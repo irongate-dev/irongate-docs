@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#f8fafc"/>
+  <rect x="160" y="60" width="80" height="80" rx="8" fill="#0f172a"/>
+  <text x="200" y="108" font-family="monospace" font-size="24" font-weight="bold" fill="white" text-anchor="middle">IG</text>
+</svg>

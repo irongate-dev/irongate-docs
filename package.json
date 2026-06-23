@@ -27,6 +27,7 @@
     "astro": "^4.8.0"
   },
   "devDependencies": {
+    "@astrojs/sitemap": "3.1.6",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-astro": "^1.0.0",
