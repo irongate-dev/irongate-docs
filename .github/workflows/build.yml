@@ -1,0 +1,131 @@
+# irongate-docs/.github/workflows/build.yml
+#
+# Builds and deploys the irongate.dev documentation site.
+#
+# Triggers:
+#   - Push to main (direct doc changes)
+#   - repository_dispatch from irongate-server (artifact updates)
+#
+# Concurrency:
+#   One run per ref at a time. If irongate-server dispatches two events
+#   in quick succession (e.g. two rapid pushes), the first build is cancelled
+#   and the second starts with the freshest artifacts. Latest always wins.
+#
+# Flow:
+#   1. Fetch .generated/* artifacts from irongate-server via GitHub API
+#   2. Run all three generators (errors, env vars, API reference)
+#   3. astro build
+#   4. Deploy to irongate.dev
+
+name: Build & Deploy Docs
+
+on:
+  push:
+    branches: [main]
+
+  # Triggered by irongate-server CI after artifact commit.
+  # Payload: { sha, ref } from the server commit that changed the artifacts.
+  repository_dispatch:
+    types: [server_artifacts_updated]
+
+concurrency:
+  # One build per ref at a time.
+  # Two rapid server artifact updates → second build cancels first → latest wins.
+  # Direct push to docs main and a server dispatch → same group (both are
+  # refs/heads/main on this repo) → second cancels first → correct behaviour.
+  group: build-and-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout irongate-docs
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Fetch artifacts from irongate-server ──────────────────────────────
+      # Fetches .generated/openapi.json, error-registry.json, env-schema.json
+      # from irongate-server main branch via GitHub API.
+      # GITHUB_TOKEN has read access to public repos automatically.
+      # For private repos: add a PAT with repo:read to SERVER_READ_TOKEN secret.
+
+      - name: Fetch artifacts from irongate-server
+        env:
+          # Use SERVER_READ_TOKEN if irongate-server is private.
+          # Falls back to GITHUB_TOKEN for public repos.
+          GH_TOKEN: ${{ secrets.SERVER_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          SERVER_REPO: ${{ github.repository_owner }}/irongate-server
+        run: pnpm tsx scripts/fetch-artifacts.ts
+        # fetch-artifacts.ts reads GH_TOKEN and SERVER_REPO from env,
+        # writes to src/_generated/. Exits 1 if any artifact is missing.
+        # Exits 0 with a warning if server is not yet generating artifacts
+        # (scaffold phase grace period).
+
+      # ── Generate docs from artifacts ──────────────────────────────────────
+
+      - name: Validate env annotations
+        run: pnpm tsx scripts/validate-env-annotations.ts
+        # Hard fail: every IRONGATE_* var must have .describe() annotation.
+
+      - name: Generate error reference
+        run: pnpm tsx scripts/generate-error-docs.ts
+
+      - name: Generate env var reference
+        run: pnpm tsx scripts/generate-env-docs.ts
+
+      - name: Generate API reference
+        run: pnpm tsx scripts/generate-api-docs.ts
+
+      # ── Build ──────────────────────────────────────────────────────────────
+
+      - name: Build Astro site
+        run: pnpm astro build
+
+      # ── Link check (PRs only — advisory) ──────────────────────────────────
+      # Internal links: hard fail. External links: warning only.
+
+      - name: Check internal links
+        if: github.event_name == 'pull_request'
+        run: pnpm tsx scripts/check-links.ts --internal-only
+        # External link check runs weekly via a separate scheduled workflow.
+
+      # ── Deploy ────────────────────────────────────────────────────────────
+      # Runs on push to main and on repository_dispatch (both land on main).
+      # Replace the deploy step with your provider (Cloudflare Pages,
+      # Vercel, Netlify, self-hosted — whatever hosts irongate.dev).
+
+      - name: Deploy to irongate.dev
+        # Example: Cloudflare Pages
+        run: |
+          echo "Deploy step — replace with your hosting provider CLI"
+          echo "e.g.: npx wrangler pages deploy dist/ --project-name irongate-docs"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # ── Post-deploy summary ────────────────────────────────────────────────
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "🔄 Triggered by: irongate-server artifact update"
+            echo "   Server SHA: ${{ github.event.client_payload.sha }}"
+            echo "   Server ref: ${{ github.event.client_payload.ref }}"
+          else
+            echo "🔄 Triggered by: direct push to irongate-docs main"
+          fi

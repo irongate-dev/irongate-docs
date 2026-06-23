@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json.schemastore.org/prettierrc",
+
+  "printWidth":        100,
+  "tabWidth":          2,
+  "useTabs":           false,
+  "semi":              true,
+  "singleQuote":       true,
+  "quoteProps":        "as-needed",
+  "trailingComma":     "all",
+  "bracketSpacing":    true,
+  "bracketSameLine":   false,
+  "arrowParens":       "always",
+  "endOfLine":         "lf",
+
+  "plugins": [
+    "prettier-plugin-astro"
+  ],
+
+  "overrides": [
+    {
+      "files": ["*.astro"],
+      "options": {
+        "parser": "astro"
+      }
+    },
+    {
+      "files": ["*.mdx", "*.md"],
+      "options": {
+        "printWidth":       80,
+        "proseWrap":        "always",
+        "embeddedLanguageFormatting": "auto"
+      }
+    },
+    {
+      "files": ["*.json"],
+      "options": {
+        "printWidth": 80
+      }
+    },
+    {
+      "files": ["*.yaml", "*.yml"],
+      "options": {
+        "singleQuote": false,
+        "printWidth":  120
+      }
+    },
+    {
+      "files": [
+        "src/content/docs/api-reference/**",
+        "src/content/docs/configuration/**",
+        "src/content/docs/errors/**"
+      ],
+      "options": {
+        "requirePragma": true
+      }
+    }
+  ]
+}
