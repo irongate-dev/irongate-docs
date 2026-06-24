@@ -1,0 +1,23 @@
+{
+  "_comment": "irongate-docs is a single package (no workspaces). Use plain -D.",
+  "_install": [
+    "# Run from irongate-docs/ root:",
+    "pnpm add -D eslint typescript-eslint eslint-plugin-astro eslint-plugin-mdx eslint-plugin-n eslint-config-prettier prettier prettier-plugin-astro"
+  ],
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "typescript-eslint": "^8.0.0",
+    "eslint-plugin-astro": "^1.0.0",
+    "eslint-plugin-mdx": "^3.0.0",
+    "eslint-plugin-n": "^17.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "prettier": "^3.0.0",
+    "prettier-plugin-astro": "^0.14.0"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  }
+}

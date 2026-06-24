@@ -1,0 +1,70 @@
+# irongate-docs/.github/workflows/check-links-weekly.yml
+#
+# Weekly external link check — advisory only (does not block PRs or deploys).
+# External links can break at any time due to third-party changes; checking
+# weekly catches rot without slowing down the PR pipeline.
+#
+# Internal links are checked on every PR via build.yml --internal-only.
+
+name: Weekly External Link Check
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 09:00 UTC
+  workflow_dispatch:       # Allow manual trigger from GitHub UI
+
+permissions:
+  contents: read
+  id-token: write   # Required by configure-pages to read Pages settings
+
+jobs:
+  check-external-links:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.8.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch artifacts from irongate-server
+        env:
+          GH_TOKEN: ${{ secrets.SERVER_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          SERVER_REPO: ${{ github.repository_owner }}/irongate-server
+        run: pnpm tsx scripts/fetch-artifacts.ts
+
+      - name: Generate all docs
+        run: |
+          pnpm tsx scripts/generate-error-docs.ts
+          pnpm tsx scripts/generate-env-docs.ts
+          pnpm tsx scripts/generate-api-docs.ts
+
+      # Build with correct site URL so canonical links in the HTML point to
+      # the deployed Pages location — these are what the external checker scans.
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v4
+
+      - name: Build Astro site
+        run: pnpm astro build
+        env:
+          SITE: ${{ steps.pages.outputs.origin }}
+          BASE: ${{ steps.pages.outputs.base_path }}
+
+      - name: Check external links
+        run: pnpm tsx scripts/check-links.ts --external-only
+        # Exits 1 if broken external links found.
+        # Creates a visible failed run in GitHub Actions for the team to investigate.
+        # Does NOT block deploys — only the weekly report.

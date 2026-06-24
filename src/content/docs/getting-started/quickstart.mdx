@@ -1,0 +1,67 @@
+---
+title: Quickstart
+description: Get Irongate running locally in 5 minutes with Docker Compose
+---
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose installed
+- A terminal
+
+## 1. Clone and configure
+
+Clone the server repository and copy the example environment file:
+
+```bash
+git clone https://github.com/your-org/irongate-server.git
+cd irongate-server
+cp .env.example .env
+```
+
+Open `.env` and set two required values:
+
+```bash
+# Generate a secure key: openssl rand -hex 32
+IRONGATE_KEK=your_generated_key_here
+
+# The URL where your Irongate server will be accessible
+IRONGATE_BASE_URL=http://localhost:3000
+```
+
+All other values in `.env.example` are pre-configured for local development.
+
+## 2. Start Irongate
+
+```bash
+docker compose up
+```
+
+Docker Compose starts PostgreSQL, Redis, runs database migrations, and starts both the auth server and admin dashboard.
+
+## 3. Verify it's running
+
+```bash
+curl http://localhost:3000/health/live
+```
+
+Expected response:
+
+```json
+{ "status": "ok" }
+```
+
+**Admin dashboard:** Open [http://localhost:3001](http://localhost:3001) in your browser.
+
+## 4. Connect your first app
+
+Follow one of the framework guides to add Irongate authentication to your application:
+
+- [Next.js App Router](/framework-guides/nextjs-app-router/)
+- [React](/framework-guides/react/)
+- [Node.js](/framework-guides/nodejs/)
+
+## Troubleshooting
+
+**`docker compose up` fails with "port already in use"** — Something is already running on port 3000, 3001, 5432, or 6379. Stop the conflicting service or edit the port mappings in `docker-compose.yml`.
+
+**Server exits immediately** — Check that `IRONGATE_KEK` is set and is not a placeholder value. The server hard-fails on insecure default keys.

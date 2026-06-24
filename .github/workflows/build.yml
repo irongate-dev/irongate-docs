@@ -1,0 +1,149 @@
+# irongate-docs/.github/workflows/build.yml
+#
+# Builds and deploys the irongate-docs site to GitHub Pages.
+#
+# Triggers:
+#   - Push to main (direct doc changes)
+#   - repository_dispatch from irongate-server (artifact updates)
+#
+# Concurrency:
+#   One run per ref at a time. If irongate-server dispatches two events
+#   in quick succession, the first build is cancelled and the second
+#   starts with the freshest artifacts. Latest always wins.
+#
+# Flow:
+#   build job:
+#     1. Fetch .generated/* artifacts from irongate-server via GitHub API
+#     2. Run all three generators (errors, env vars, API reference)
+#     3. astro build (SITE + BASE injected by configure-pages)
+#     4. Upload dist/ as Pages artifact
+#   deploy job:
+#     5. Deploy artifact to GitHub Pages
+#
+# Setup:
+#   Enable GitHub Pages in repo Settings → Pages → Source: GitHub Actions
+
+name: Build & Deploy Docs
+
+on:
+  push:
+    branches: [main]
+
+  # Triggered by irongate-server CI after artifact commit.
+  # Payload: { sha, ref } from the server commit that changed the artifacts.
+  repository_dispatch:
+    types: [server_artifacts_updated]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  # One build per ref at a time. Latest push always wins.
+  group: build-and-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout irongate-docs
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.8.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Fetch artifacts from irongate-server ──────────────────────────────
+      # Fetches src/_generated/openapi.json, error-registry.json, env-schema.json
+      # from irongate-server main branch via GitHub API.
+      # GITHUB_TOKEN has read access to public repos automatically.
+      # For private repos: add a PAT with repo:read as SERVER_READ_TOKEN secret.
+
+      - name: Fetch artifacts from irongate-server
+        env:
+          GH_TOKEN: ${{ secrets.SERVER_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          SERVER_REPO: ${{ github.repository_owner }}/irongate-server
+        run: pnpm tsx scripts/fetch-artifacts.ts
+
+      # ── Generate docs from artifacts ──────────────────────────────────────
+
+      - name: Validate env annotations
+        run: pnpm tsx scripts/validate-env-annotations.ts
+
+      - name: Generate error reference
+        run: pnpm tsx scripts/generate-error-docs.ts
+
+      - name: Generate env var reference
+        run: pnpm tsx scripts/generate-env-docs.ts
+
+      - name: Generate API reference
+        run: pnpm tsx scripts/generate-api-docs.ts
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      # configure-pages reads the repo's GitHub Pages settings and outputs:
+      #   origin    → https://<org>.github.io
+      #   base_path → /irongate-docs  (or / for org pages)
+      # These become the Astro site + base values so all canonical URLs,
+      # asset paths, and the sitemap point to the correct deployed location.
+
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v4
+
+      - name: Build Astro site
+        run: pnpm astro build
+        env:
+          SITE: ${{ steps.pages.outputs.origin }}
+          BASE: ${{ steps.pages.outputs.base_path }}
+
+      # ── Link check (PRs only — advisory) ──────────────────────────────────
+      # Internal links: hard fail. External links: checked weekly separately.
+
+      - name: Check internal links
+        if: github.event_name == 'pull_request'
+        run: pnpm tsx scripts/check-links.ts --internal-only
+
+      # ── Upload Pages artifact ──────────────────────────────────────────────
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+      # ── Post-build summary ────────────────────────────────────────────────
+
+      - name: Build summary
+        if: always()
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "🔄 Triggered by: irongate-server artifact update"
+            echo "   Server SHA: ${{ github.event.client_payload.sha }}"
+            echo "   Server ref: ${{ github.event.client_payload.ref }}"
+          else
+            echo "🔄 Triggered by: direct push to irongate-docs main"
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
