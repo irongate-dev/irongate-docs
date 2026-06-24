@@ -13,6 +13,10 @@ on:
     - cron: '0 9 * * 1'  # Every Monday at 09:00 UTC
   workflow_dispatch:       # Allow manual trigger from GitHub UI
 
+permissions:
+  contents: read
+  id-token: write   # Required by configure-pages to read Pages settings
+
 jobs:
   check-external-links:
     runs-on: ubuntu-latest
@@ -47,11 +51,20 @@ jobs:
           pnpm tsx scripts/generate-env-docs.ts
           pnpm tsx scripts/generate-api-docs.ts
 
+      # Build with correct site URL so canonical links in the HTML point to
+      # the deployed Pages location — these are what the external checker scans.
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v4
+
       - name: Build Astro site
         run: pnpm astro build
+        env:
+          SITE: ${{ steps.pages.outputs.origin }}
+          BASE: ${{ steps.pages.outputs.base_path }}
 
       - name: Check external links
         run: pnpm tsx scripts/check-links.ts --external-only
         # Exits 1 if broken external links found.
-        # This creates a visible failed run in GitHub Actions for the team to investigate.
+        # Creates a visible failed run in GitHub Actions for the team to investigate.
         # Does NOT block deploys — only the weekly report.

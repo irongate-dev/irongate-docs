@@ -1,6 +1,6 @@
 # irongate-docs/.github/workflows/build.yml
 #
-# Builds and deploys the irongate.dev documentation site.
+# Builds and deploys the irongate-docs site to GitHub Pages.
 #
 # Triggers:
 #   - Push to main (direct doc changes)
@@ -8,14 +8,20 @@
 #
 # Concurrency:
 #   One run per ref at a time. If irongate-server dispatches two events
-#   in quick succession (e.g. two rapid pushes), the first build is cancelled
-#   and the second starts with the freshest artifacts. Latest always wins.
+#   in quick succession, the first build is cancelled and the second
+#   starts with the freshest artifacts. Latest always wins.
 #
 # Flow:
-#   1. Fetch .generated/* artifacts from irongate-server via GitHub API
-#   2. Run all three generators (errors, env vars, API reference)
-#   3. astro build
-#   4. Deploy to irongate.dev
+#   build job:
+#     1. Fetch .generated/* artifacts from irongate-server via GitHub API
+#     2. Run all three generators (errors, env vars, API reference)
+#     3. astro build (SITE + BASE injected by configure-pages)
+#     4. Upload dist/ as Pages artifact
+#   deploy job:
+#     5. Deploy artifact to GitHub Pages
+#
+# Setup:
+#   Enable GitHub Pages in repo Settings → Pages → Source: GitHub Actions
 
 name: Build & Deploy Docs
 
@@ -28,11 +34,13 @@ on:
   repository_dispatch:
     types: [server_artifacts_updated]
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 concurrency:
-  # One build per ref at a time.
-  # Two rapid server artifact updates → second build cancels first → latest wins.
-  # Direct push to docs main and a server dispatch → same group (both are
-  # refs/heads/main on this repo) → second cancels first → correct behaviour.
+  # One build per ref at a time. Latest push always wins.
   group: build-and-deploy-${{ github.ref }}
   cancel-in-progress: true
 
@@ -59,28 +67,21 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # ── Fetch artifacts from irongate-server ──────────────────────────────
-      # Fetches .generated/openapi.json, error-registry.json, env-schema.json
+      # Fetches src/_generated/openapi.json, error-registry.json, env-schema.json
       # from irongate-server main branch via GitHub API.
       # GITHUB_TOKEN has read access to public repos automatically.
-      # For private repos: add a PAT with repo:read to SERVER_READ_TOKEN secret.
+      # For private repos: add a PAT with repo:read as SERVER_READ_TOKEN secret.
 
       - name: Fetch artifacts from irongate-server
         env:
-          # Use SERVER_READ_TOKEN if irongate-server is private.
-          # Falls back to GITHUB_TOKEN for public repos.
           GH_TOKEN: ${{ secrets.SERVER_READ_TOKEN || secrets.GITHUB_TOKEN }}
           SERVER_REPO: ${{ github.repository_owner }}/irongate-server
         run: pnpm tsx scripts/fetch-artifacts.ts
-        # fetch-artifacts.ts reads GH_TOKEN and SERVER_REPO from env,
-        # writes to src/_generated/. Exits 1 if any artifact is missing.
-        # Exits 0 with a warning if server is not yet generating artifacts
-        # (scaffold phase grace period).
 
       # ── Generate docs from artifacts ──────────────────────────────────────
 
       - name: Validate env annotations
         run: pnpm tsx scripts/validate-env-annotations.ts
-        # Hard fail: every IRONGATE_* var must have .describe() annotation.
 
       - name: Generate error reference
         run: pnpm tsx scripts/generate-error-docs.ts
@@ -92,34 +93,39 @@ jobs:
         run: pnpm tsx scripts/generate-api-docs.ts
 
       # ── Build ──────────────────────────────────────────────────────────────
+      # configure-pages reads the repo's GitHub Pages settings and outputs:
+      #   origin    → https://<org>.github.io
+      #   base_path → /irongate-docs  (or / for org pages)
+      # These become the Astro site + base values so all canonical URLs,
+      # asset paths, and the sitemap point to the correct deployed location.
+
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v4
 
       - name: Build Astro site
         run: pnpm astro build
+        env:
+          SITE: ${{ steps.pages.outputs.origin }}
+          BASE: ${{ steps.pages.outputs.base_path }}
 
       # ── Link check (PRs only — advisory) ──────────────────────────────────
-      # Internal links: hard fail. External links: warning only.
+      # Internal links: hard fail. External links: checked weekly separately.
 
       - name: Check internal links
         if: github.event_name == 'pull_request'
         run: pnpm tsx scripts/check-links.ts --internal-only
-        # External link check runs weekly via a separate scheduled workflow.
 
-      # ── Deploy ────────────────────────────────────────────────────────────
-      # Runs on push to main and on repository_dispatch (both land on main).
-      # Replace the deploy step with your provider (Cloudflare Pages,
-      # Vercel, Netlify, self-hosted — whatever hosts irongate.dev).
+      # ── Upload Pages artifact ──────────────────────────────────────────────
 
-      - name: Deploy to irongate.dev
-        # Example: Cloudflare Pages
-        run: |
-          echo "Deploy step — replace with your hosting provider CLI"
-          echo "e.g.: npx wrangler pages deploy dist/ --project-name irongate-docs"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
 
-      # ── Post-deploy summary ────────────────────────────────────────────────
+      # ── Post-build summary ────────────────────────────────────────────────
 
-      - name: Deployment summary
+      - name: Build summary
         if: always()
         run: |
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
@@ -129,3 +135,15 @@ jobs:
           else
             echo "🔄 Triggered by: direct push to irongate-docs main"
           fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

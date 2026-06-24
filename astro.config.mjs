@@ -58,7 +58,10 @@ export default defineConfig({
       pagination: true,
     }),
   ],
-  site: "https://irongate.dev",
+  // SITE and BASE are injected by the GitHub Actions configure-pages step.
+  // Locally (pnpm dev), both are undefined and Astro runs at http://localhost:4321/.
+  site: process.env.SITE,
+  base: process.env.BASE ?? '/',
   image: {
     service: passthroughImageService(),
   },
