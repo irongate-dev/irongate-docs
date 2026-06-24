@@ -176,7 +176,9 @@ if (!INTERNAL_ONLY && externalLinks.length > 0) {
   console.log(`   Checking ${uniqueExternal.length} unique external URLs...`);
 
   // Known-good domains — skip checking (avoids rate limiting on common CDNs)
+  // localhost is always skipped — it's a dev-only reference (e.g. quickstart guide)
   const SKIP_DOMAINS = new Set([
+    'localhost',
     'github.com', 'www.github.com',
     'npmjs.com', 'www.npmjs.com',
     'nodejs.org', 'www.nodejs.org',
